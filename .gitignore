@@ -1,0 +1,12 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+.browser/
+.test-browser-profiles/
+playwright-results/
+.browser134/
+dist-dev/
+release/
+
+dist-e2e/

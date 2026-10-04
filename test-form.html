@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>easyApply local application</title>
+    <style>
+      body {
+        font: 16px system-ui;
+        max-width: 760px;
+        margin: 40px auto;
+        background: #f0fdfa;
+      }
+      form {
+        padding: 24px;
+        background: white;
+        border-radius: 16px;
+      }
+      label {
+        display: block;
+        margin: 12px 0;
+      }
+      input,
+      textarea,
+      select {
+        padding: 8px;
+      }
+      #events {
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Northstar · Frontend Developer</h1>
+    <p>Local test application. Nothing is sent to a server.</p>
+    <form id="application">
+      <label>10th percentage<input name="tenthPercent" /></label>
+      <label>University<input name="university" /></label>
+      <label>Notice period<input name="noticePeriod" /></label>
+      <label
+        >Willing to relocate<select name="relocate">
+          <option value="">Choose</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select></label
+      >
+      <label
+        >Authorized to work in India<select name="workAuthorization">
+          <option value="">Choose</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select></label
+      >
+      <div class="crc-form-row">
+        <label>First Name *</label
+        ><crux-text-component cx-prop-label="First Name"
+          ><lyte-input data-zcqa="manual_First_Name"
+            ><div><input name="rec-form_31840000000003149" /></div></lyte-input
+        ></crux-text-component>
+      </div>
+      <div class="crc-form-row">
+        <label>Last Name *</label
+        ><crux-text-component cx-prop-label="Last Name"
+          ><lyte-input data-zcqa="manual_Last_Name"
+            ><div><input name="rec-form_31840000000003151" /></div></lyte-input
+        ></crux-text-component>
+      </div>
+      <div>
+        <label>Street *</label
+        ><lyte-input data-zcqa="manual_Street"
+          ><input name="rec-form_street"
+        /></lyte-input>
+      </div>
+      <div>
+        <label>Total Years Of Experience *</label
+        ><crux-text-component cx-prop-label="Total Years Of Experience"
+          ><input name="rec-form_years"
+        /></crux-text-component>
+      </div>
+      <label>Full name <input name="fullName" /></label
+      ><label>Email address <input type="email" name="email" /></label
+      ><label>Contact number <input name="phone" /></label
+      ><input aria-label="City" name="town" /><label
+        >Date of birth <input type="date" name="dob" /></label
+      ><label
+        >Country
+        <select name="country">
+          <option value="">Choose</option>
+          <option value="IN">India</option>
+          <option>United States</option>
+        </select></label
+      >
+      <fieldset>
+        <legend>Gender</legend>
+        <label><input type="radio" name="gender" value="Female" />Female</label
+        ><label><input type="radio" name="gender" value="Male" />Male</label>
+      </fieldset>
+      <fieldset>
+        <legend>Skills</legend>
+        <label><input type="checkbox" name="skills" value="React" />React</label
+        ><label><input type="checkbox" name="skills" value="Java" />Java</label>
+      </fieldset>
+      <label>Work experience<textarea name="experience"></textarea></label
+      ><label>PAN number<input name="pan" /></label
+      ><label>Aadhaar number<input name="aadhaar" /></label
+      ><label>Password<input type="password" name="password" /></label
+      ><label>OTP<input name="otp" /></label
+      ><label>Bank account number<input name="bankAccount" /></label
+      ><label><input type="checkbox" name="terms" />I agree to terms</label
+      ><label>Resume<input type="file" name="resume" /></label
+      ><button type="submit">Submit manually</button>
+    </form>
+    <h2>Observed events</h2>
+    <section aria-label="Login-style detection fixtures">
+      <label
+        >Current salary<input id="numeric-salary" type="number" min="0"
+      /></label>
+      <label>Current salary<input id="text-salary" type="text" /></label>
+      <label
+        >Total years of experience<input
+          id="bounded-experience"
+          type="number"
+          min="1"
+          max="50"
+      /></label>
+      <div><span>Primary contact no.</span><input id="alias-mobile" /></div>
+      <label>Mail ID<input id="alias-email" /></label>
+      <label>Emergency contact number<input id="emergency-contact" /></label>
+      <div>
+        <span>EMAIL ID</span>
+        <div><input id="floating-login" type="text" /></div>
+      </div>
+      <div><input id="typed-login" type="email" /></div>
+      <div>
+        <span>PASSWORD</span><input id="login-secret" type="password" />
+      </div>
+    </section>
+    <div id="events"></div>
+    <script>
+      window.eventCounts = { input: 0, change: 0, blur: 0, submit: 0 };
+      for (const type of Object.keys(window.eventCounts)) {
+        document.getElementById("application").addEventListener(
+          type,
+          (e) => {
+            window.eventCounts[type]++;
+            if (type === "submit") e.preventDefault();
+            document.getElementById("events").textContent = JSON.stringify(
+              window.eventCounts,
+            );
+          },
+          true,
+        );
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Application steps fixture</title>
+<body><h1>Application</h1><form onsubmit="return false">
+<section id="first"><label>First name<input name="firstName"></label><button type="button" value="wizard_step_2" id="next">Next</button></section>
+<section id="second" hidden><label>Email address<input name="email"></label><button type="button" id="validation">Next step</button><p id="error"></p><button type="button" id="back">Back</button><button type="button" id="continue">Continue</button></section>
+<section id="third" hidden><label>Phone number<input name="phone"></label><button type="button">Submit application</button></section>
+</form><script>
+const stage = new URL(location.href).searchParams.get('stage');
+if (stage === '3') { document.querySelector('#first').hidden = true; document.querySelector('#third').hidden = false; }
+document.querySelector('#next').onclick = () => setTimeout(() => {document.querySelector('#first').hidden = true; document.querySelector('#second').hidden = false;}, 150);
+document.querySelector('#validation').onclick = () => {document.querySelector('#error').textContent = 'Please review this step.';};
+document.querySelector('#back').onclick = () => {document.querySelector('#second').hidden = true; document.querySelector('#first').hidden = false;};
+document.querySelector('#continue').onclick = () => {location.href = '?stage=3';};
+</script></body></html>

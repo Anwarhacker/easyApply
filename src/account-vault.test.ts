@@ -1,0 +1,22 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { ACCOUNT_VAULT, openAccounts, saveAccounts } from "./account-vault";
+afterEach(() => vi.unstubAllGlobals());
+it("encrypts credentials, rejects wrong keys and prevents stale overwrites", async () => {
+  const store: Record<string, unknown> = {};
+  vi.stubGlobal("chrome", { storage: { local: { get: async () => store, set: async (value: object) => Object.assign(store, value) } } });
+  vi.stubGlobal("navigator", { locks: { request: async (_: string, fn: () => unknown) => fn() } });
+  await expect(openAccounts("short")).rejects.toThrow("12 characters");
+  const opened = await openAccounts("a separate vault passphrase");
+  const accounts = [{ id: "one", email: "test@example.com", password: "Secret with spaces!" }];
+  const saved = await saveAccounts(opened.session, accounts);
+  expect(JSON.stringify(store)).not.toContain(accounts[0].email);
+  expect(JSON.stringify(store)).not.toContain(accounts[0].password);
+  expect((await openAccounts("a separate vault passphrase")).accounts).toEqual(accounts);
+  await expect(openAccounts("wrong passphrase")).rejects.toThrow("Unable to unlock");
+  await expect(saveAccounts(opened.session, [])).rejects.toThrow("another window");
+  await saveAccounts(saved, []);
+  expect((await openAccounts("a separate vault passphrase")).accounts).toEqual([]);
+  const envelope = store[ACCOUNT_VAULT] as { data: number[] };
+  envelope.data[0] ^= 1;
+  await expect(openAccounts("a separate vault passphrase")).rejects.toThrow("Unable to unlock");
+});
