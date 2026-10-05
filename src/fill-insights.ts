@@ -10,6 +10,7 @@ export function missingEssentials(values: Profile["values"]) {
 export type MatchStatus = "ready" | "attention" | "preserved";
 export function matchStatus(match: Match): MatchStatus {
   if (match.blocked && match.reason?.startsWith("Already filled")) return "preserved";
+  if (match.confidence !== undefined && match.confidence < 70) return "attention";
   if (legalFields.includes(match.field ?? "")) return "attention";
   if (!match.blocked && (match.field || match.remembered) && match.value && match.kind !== "file" && !match.sensitive) return "ready";
   return "attention";

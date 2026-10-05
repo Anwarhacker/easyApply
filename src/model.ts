@@ -136,6 +136,10 @@ export const blankProfile = (title = "Frontend Developer"): Profile => ({
 export type Match = {
   reason?: string;
   blocked?: boolean;
+  confidence?: number;
+  evidence?: string[];
+  answerId?: string;
+  answerSuggestions?: { id: string; question: string; answer: string; category: string; score: number; reasons: string[] }[];
   remembered?: boolean;
   id: string;
   label: string;

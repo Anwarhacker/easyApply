@@ -47,6 +47,8 @@ import { labelExamples } from "./label-examples";
 import { SmartFillPrompt } from "./SmartFillPrompt";
 import { WhyHireBoxes } from "./WhyHireBoxes";
 import { AboutYouBox } from "./AboutYouBox";
+import { AnswerLibrary } from "./AnswerLibrary";
+import { getAnswerLibrary, recordAnswerUsage } from "./answer-library";
 import { ResumeParserModal } from "./ResumeParserModal";
 import { CoverLetterModal } from "./CoverLetterModal";
 import { ResumeVaultCard } from "./ResumeVaultCard";
@@ -111,7 +113,7 @@ function App() {
     [apps, setApps] = useState<Application[]>([]),
     [active, setActive] = useState(""),
     [tab, setTab] = useState(
-      ["profiles", "identity", "tracker"].includes(initialTab) ? initialTab : "profiles"
+      ["profiles", "identity", "tracker", "answers"].includes(initialTab) ? initialTab : "profiles"
     ),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
@@ -309,6 +311,11 @@ function App() {
       catch (error) { aiStatus = `AI could not finish: ${error instanceof Error ? error.message : String(error)} Ordinary fields are still available for review.`; }
     }
 
+    let answerLibrary = [] as Awaited<ReturnType<typeof getAnswerLibrary>>;
+    let answerLibraryStatus = "";
+    try { answerLibrary = await getAnswerLibrary(); }
+    catch (error) { answerLibraryStatus = error instanceof Error ? `Saved answer suggestions unavailable: ${error.message}` : "Saved answer suggestions unavailable."; }
+
     const result = await withTimeout(
       chrome.tabs.sendMessage(
         current.id,
@@ -316,6 +323,7 @@ function App() {
           type: "detect",
           profileId: profile.id,
           customFieldAnswers: (await readData()).profiles.find(p => p.id === profile.id)?.customFieldAnswers,
+          answerLibrary,
           values: { ...profile.values, ...identity },
         },
         { frameId: 0 },
@@ -329,12 +337,13 @@ function App() {
     setMatchFilter("all");
     setMatchSearch("");
     setConfirmed(false);
-    setMessage([resumeStatus, aiStatus || (
+    setMessage([resumeStatus, answerLibraryStatus, aiStatus || (
       result.matches.length
         ? result.matches.some((m: Match) => m.selected)
           ? "Review each value before filling."
           : "No fields are selected. Check that your profile has values for these fields. Unrecognized or unsupported fields need manual entry."
-        : "No eligible fields found. Embedded frames and closed shadow roots are not supported.")].filter(Boolean).join(" "),
+        : "No eligible fields found. Embedded frames and closed shadow roots are not supported."),
+      result.matches.some((m: Match) => m.answerSuggestions?.length) ? "Choose a saved answer below to add it to the reviewed fill list." : ""].filter(Boolean).join(" "),
     );
   }
   return (
@@ -539,6 +548,7 @@ function App() {
                 { id: "profiles", label: "Job Profiles" },
                 { id: "identity", label: "Encrypted Identity" },
                 { id: "tracker", label: "Application Tracker" },
+                { id: "answers", label: "Answer Library" },
               ].map((t) => (
                 <button
                   type="button"
@@ -797,6 +807,7 @@ function App() {
                 </footer>
               </form>
             )}
+            {tab === "answers" && <AnswerLibrary />}
             {tab === "identity" && (
               <section className="card">
                 <h2>Encrypted identity vault</h2>
@@ -1038,7 +1049,7 @@ function App() {
                       onClick={() =>
                         setMatches(
                           matches.map((m) =>
-                            !m.blocked && (m.field || m.remembered) && m.value && m.kind !== "file"
+                            !m.blocked && (m.field || m.remembered) && m.value && m.kind !== "file" && (m.confidence === undefined || m.confidence >= 70)
                               ? { ...m, selected: true }
                               : m,
                           ),
@@ -1063,6 +1074,7 @@ function App() {
                 <p>
                   Unchecked fields stay untouched. Upload documents manually.
                 </p>
+                {matches.some(m => m.confidence !== undefined && m.confidence < 70) && <p className="hint">Low-confidence matches start unchecked and are excluded from Select all. Review the field evidence, then select each one individually if it is correct.</p>}
                 <p className="destination">
                   Destination: {pageUrl ? new URL(pageUrl).host : ""} · Preview
                   expires in 2 minutes
@@ -1074,7 +1086,7 @@ function App() {
                   </div>
                   {!visibleMatches.length && <p role="status">No fields match this filter. Try All or clear your search.</p>}
                   {visibleMatches.map((m) => (
-                    <label className={`match ${m.selected ? "match-selected" : ""} ${(!m.field && !m.remembered) || !m.value ? "match-empty" : ""}`} key={m.id}>
+                    <React.Fragment key={m.id}><label className={`match ${m.selected ? "match-selected" : ""} ${(!m.field && !m.remembered) || !m.value ? "match-empty" : ""}`}>
                       <input
                         type="checkbox"
                         checked={m.selected}
@@ -1098,6 +1110,7 @@ function App() {
                               ? `•••• ${m.value.slice(-4)}`
                               : m.value || m.reason || "Needs your answer"}
                           {m.reason && m.value ? ` · ${m.reason}` : ""}
+                          {m.confidence !== undefined ? ` · ${m.confidence}% detection confidence${m.evidence?.length ? ` (${m.evidence.join("; ")})` : ""}` : ""}
                           {m.remembered ? " · Remembered answer" : ""}
                           {m.sensitive ? " · Sensitive" : ""}
                         </em>
@@ -1112,6 +1125,18 @@ function App() {
                         )}
                       </span>
                     </label>
+                    {!!m.answerSuggestions?.length && <div className="answer-match-suggestions" aria-label={`Saved answers for ${m.label}`}>
+                      <strong>Saved answer suggestions</strong>
+                      {m.answerSuggestions.map(suggestion => <article key={suggestion.id}>
+                        <div><span>{Math.round(suggestion.score * 100)}% · {suggestion.category}{suggestion.reasons.length ? ` · ${suggestion.reasons.join(", ")}` : ""}</span><p>{suggestion.question}</p><blockquote>{suggestion.answer}</blockquote></div>
+                        <button type="button" disabled={busy} onClick={event => {
+                          event.preventDefault(); event.stopPropagation();
+                          void recordAnswerUsage(suggestion.id).catch(() => {});
+                          setMatches(current => current.map(item => item.id === m.id ? { ...item, value: suggestion.answer, answerId: suggestion.id, remembered: true, selected: true, reason: "Saved answer selected — review before filling." } : item));
+                        }}>{m.answerId === suggestion.id ? "Selected" : "Use answer"}</button>
+                      </article>)}
+                    </div>}
+                    </React.Fragment>
                   ))}
                 </div>
             </section>

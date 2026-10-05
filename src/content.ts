@@ -8,6 +8,10 @@ import { aiFillSchema, scanAIPage, fillAIPage, aiReplaceSchema, replaceAIAnswer 
 import { matchField, forbidden, normalize } from "./matching";
 import type { Match, Profile, Application } from "./model";
 import { signals, type Control } from "./field-signals";
+import { detectField } from "./field-detection";
+import { rankAnswerMatches } from "./answer-matcher";
+import type { SavedAnswer } from "./answer-library";
+import { savedAnswerSchema } from "./answer-library";
 import { PREVIEW_TTL, secureIdentityPage } from "./security";
 import { z } from "zod";
 import { legalFields } from "./fresher";
@@ -31,8 +35,8 @@ import {
   isResumeInput,
 } from "./resume-vault";
 
-function fieldForControl(el: Control, hints = signals(el)) {
-  const field = matchField(hints);
+function fieldForControl(el: Control, hints = signals(el), detected = matchField(hints)) {
+  const field = detected;
   return field && birthDatePart(el, hints) ? "dob" : field;
 }
 function supportedDatePicker(el: Control): boolean {
@@ -49,6 +53,7 @@ function radioHasSelection(el: Control): boolean {
 }
 
 const rememberedMatches = new Map<string, {question: string; answer: string}>();
+const answerSuggestionMatches = new Map<string, Map<string, {question: string; answer: string}>>();
 const disclosureApprovals = new Map<string, string>();
 function disclosureControlValue(el: Control, answer: string): string {
   if (!answer) return "";
@@ -118,9 +123,10 @@ const controlValue = (el: Control) => {
   return (el as HTMLInputElement).value || "";
 };
 
-function detect(values: Record<string, string>, answers: Record<string, string> = {}, profileId = ""): Match[] {
+function detect(values: Record<string, string>, answers: Record<string, string> = {}, profileId = "", answerLibrary: SavedAnswer[] = []): Match[] {
   if (filling) throw Error("A fill is still running. Wait for its result before scanning again.");
   rememberedMatches.clear();
+  answerSuggestionMatches.clear();
   registry.clear();
   selectContexts.clear();
   disclosureApprovals.clear();
@@ -135,9 +141,14 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
     scanId = "";
     snapshots.clear();
     registry.clear();
-  disclosureApprovals.clear();
-  phonePairs.clear();
+    rememberedMatches.clear();
+    answerSuggestionMatches.clear();
+    disclosureApprovals.clear();
+    phonePairs.clear();
   }, PREVIEW_TTL);
+  const answerRole = answerLibrary.length
+    ? extractJobMetadata(document, location.href).position || values.preferredRole
+    : values.preferredRole;
   return getAllControls()
     .filter(
       (el) => {
@@ -158,12 +169,14 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
       if (registry.size >= 300) return null;
       const hints = signals(el);
       if (hints.some(forbidden)) return null;
-      const field = fieldForControl(el, hints),
+      const detection = detectField(el);
+      const field = fieldForControl(el, hints, detection.type),
         id = crypto.randomUUID();
       registry.set(id, el);
       if (isReactSelect(el)) selectContexts.set(id, { state: values.state ?? "", country: values.country ?? "" });
       const kind = isDropdownControl(el) ? "select" : (el as HTMLInputElement).type || el.tagName.toLowerCase();
       let value = field ? (values[field] ?? "") : "";
+      let answerSuggestions: Match["answerSuggestions"];
       let unmatchedOption = false;
       if (field && !value && (field === "aboutYou" || field === "whyHire" || field === "whyCompany")) {
         const meta = extractJobMetadata(document, location.href);
@@ -245,6 +258,12 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
             value = options.length === 1 ? options[0].value : "";
           } else value = answer;
           if (value) rememberedMatches.set(id, {question,answer});
+        } else if (question && (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement && ["text", "search"].includes(el.type))) {
+          const suggestions = rankAnswerMatches(question, answerLibrary, answerRole);
+          if (suggestions.length) {
+            answerSuggestions = suggestions.map(({ answer: saved, score, reasons }) => ({ id: saved.id, question: saved.question, answer: saved.answer, category: saved.category, score, reasons }));
+            answerSuggestionMatches.set(id, new Map(suggestions.map(({ answer: saved }) => [saved.id, { question, answer: saved.answer }])));
+          }
         }
       }
       if (isDisclosureField(field)) {
@@ -261,14 +280,19 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
       const isBlank = isDropdownControl(el) ? isBlankDropdown(valStr) : !valStr;
       const existingSelection = radioHasSelection(el) || (kind === "checkbox" && (el as HTMLInputElement).checked);
       const blocked = !!incompatible || unmatchedOption || existingSelection || (!["checkbox", "radio"].includes(kind) && !isBlank);
+      const lowConfidence = !!field && detection.confidence < 70;
       const reason = existingSelection ? "Already filled — existing choice preserved" : incompatible || (unmatchedOption ? "No matching dropdown option" : !isBlank && !["checkbox", "radio"].includes(kind)
         ? "Already filled — existing value preserved" : !field && !rememberedMatches.has(id)
           ? "Needs your answer — no profile field matched" : !value
             ? "No usable saved value — update this profile field" : legalFields.includes(field ?? "")
-              ? "Review and select this answer yourself" : undefined);
+              ? "Review and select this answer yourself" : lowConfidence
+                ? `Low confidence (${detection.confidence}%). Confirm this field before filling.` : undefined);
       const match: Match = {
         reason,
         blocked,
+        confidence: field ? detection.confidence : undefined,
+        evidence: field ? detection.evidence : undefined,
+        answerSuggestions,
         id,
         label:
           (hints.find(Boolean) ?? kind) +
@@ -286,6 +310,7 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
           field !== "pan" &&
           field !== "aadhaar" &&
           !legalFields.includes(field ?? "") &&
+          !lowConfidence &&
           (["checkbox", "radio"].includes(kind)
             ? controlValue(el) === "false"
             : isBlank),
@@ -340,6 +365,7 @@ async function performFill(
     const currentKind = isCustomDropdown
       ? "select"
       : (el as HTMLInputElement)?.type || el?.tagName.toLowerCase();
+    const suggestedAnswer = m.answerId ? answerSuggestionMatches.get(m.id)?.get(m.answerId) : undefined;
     if (
       !el ||
       !snapshot ||
@@ -350,7 +376,8 @@ async function performFill(
       controlValue(el) !== snapshot.value ||
       (isSelect && (el as HTMLSelectElement).innerHTML !== snapshot.selectOptions) ||
       snapshot.match.field !== m.field ||
-      snapshot.match.value !== m.value ||
+      (!m.answerId && snapshot.match.value !== m.value) ||
+      (m.answerId && (!suggestedAnswer || suggestedAnswer.answer !== m.value)) ||
       (el as HTMLInputElement).disabled ||
       el.matches(":disabled") ||
       ((el as HTMLInputElement).readOnly && !supportedDatePicker(el)) ||
@@ -395,13 +422,13 @@ async function performFill(
       }
       continue;
     }
-    if (!m.selected || (!m.field && !rememberedMatches.has(m.id)) || !m.value) continue;
+    if (!m.selected || (!m.field && !rememberedMatches.has(m.id) && !m.answerId) || !m.value) continue;
     if (snapshot.match.blocked) { errors.push(`${m.label}: ${snapshot.match.reason}`); continue; }
     if (radioHasSelection(el)) {
       errors.push(`${m.label}: a radio choice is already selected; existing answer preserved`);
       continue;
     }
-    const memory = rememberedMatches.get(m.id);
+    const memory = suggestedAnswer ?? rememberedMatches.get(m.id);
     if (memory && (memoryQuestion(el) !== memory.question || (el instanceof HTMLSelectElement && [...el.options].filter(o => !o.disabled && !o.parentElement?.matches("optgroup[disabled]") && o.value === m.value && o.text.trim() === memory.answer).length !== 1))) {
       errors.push(`${m.label}: remembered question changed; scan again`); continue;
     }
@@ -798,6 +825,7 @@ const requestSchema = z.discriminatedUnion("type", [
     values: z.record(z.string().max(100), z.string().max(10000)),
     profileId: z.string().max(100).optional(),
     customFieldAnswers: customFieldAnswersSchema.optional(),
+    answerLibrary: z.array(savedAnswerSchema).max(500).optional(),
   }),
   z.object({
     type: z.literal("fill"),
@@ -814,6 +842,7 @@ const requestSchema = z.discriminatedUnion("type", [
           sensitive: z.boolean(),
           selected: z.boolean(),
           remembered: z.boolean().optional(),
+          answerId: z.string().max(100).optional(),
         }),
       )
       .max(300),
@@ -845,7 +874,7 @@ window.applyEaseListener = (raw, sender, respond) => {
     if (message.type === "ping") respond({ ready: true });
     if (message.type === "detect") {
       if (message.profileId) fieldMemory.selectProfile(message.profileId);
-      respond({ matches: detect(message.values, message.customFieldAnswers, message.profileId), scanId, url: scanUrl });
+      respond({ matches: detect(message.values, message.customFieldAnswers, message.profileId, message.answerLibrary), scanId, url: scanUrl });
     }
     if (message.type === "fill") {
       fill(
