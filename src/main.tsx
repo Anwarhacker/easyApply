@@ -48,6 +48,7 @@ import { SmartFillPrompt } from "./SmartFillPrompt";
 import { WhyHireBoxes } from "./WhyHireBoxes";
 import { AboutYouBox } from "./AboutYouBox";
 import { AnswerLibrary } from "./AnswerLibrary";
+import { BackupRestore } from "./BackupRestore";
 import { getAnswerLibrary, recordAnswerUsage } from "./answer-library";
 import { ResumeParserModal } from "./ResumeParserModal";
 import { CoverLetterModal } from "./CoverLetterModal";
@@ -113,7 +114,7 @@ function App() {
     [apps, setApps] = useState<Application[]>([]),
     [active, setActive] = useState(""),
     [tab, setTab] = useState(
-      ["profiles", "identity", "tracker", "answers"].includes(initialTab) ? initialTab : "profiles"
+      ["profiles", "identity", "tracker", "answers", "backup"].includes(initialTab) ? initialTab : "profiles"
     ),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
@@ -551,10 +552,11 @@ function App() {
                 { id: "identity", label: "Encrypted Identity" },
                 { id: "tracker", label: "Application Tracker" },
                 { id: "answers", label: "Answer Library" },
+                { id: "backup", label: "Backup & Restore" },
               ].map((t) => (
                 <button
                   type="button"
-                  className={tab === t.id ? "active" : ""}
+                  className={`${tab === t.id ? "active" : ""}${t.id === "backup" ? " backup-tab" : ""}`.trim()}
                   aria-pressed={tab === t.id}
                   key={t.id}
                   onClick={() => { if (t.id === "tracker") setTrackerDueOnly(false); setTab(t.id); }}
@@ -811,6 +813,7 @@ function App() {
               </form>
             )}
             {tab === "answers" && <AnswerLibrary />}
+            {tab === "backup" && <BackupRestore />}
             {tab === "identity" && (
               <section className="card">
                 <h2>Encrypted identity vault</h2>

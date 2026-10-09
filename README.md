@@ -266,3 +266,10 @@ Below the application tools, Saved accounts starts collapsed behind a compact to
 
 
 Dropdown accuracy: placeholders and disabled option groups are skipped. General partial matches require every target word and a unique result; ambiguous choices remain manual. State and city aliases use complete names or codes. Gender categories remain distinct. Custom dropdowns use their own options or explicitly linked menus, wait briefly for delayed rendering, and confirm site-managed selection state. The extension does not rewrite custom labels or hide website validation errors. Unlinked menus or controls that do not expose a verifiable result require manual selection.
+# Backup and restore
+
+Open Settings → **Backup & Restore** to download a readable, versioned JSON backup or choose a previous easyApply backup. Select categories to export; imported files are validated and previewed before applying changes. Backups include job profiles, tracker records, the Answer Library, reusable custom information, learning preferences, active profile selection, and locally stored resume files.
+
+**Merge** updates records with matching IDs from the backup and keeps unrelated existing records. For matching Answer Library questions, the imported entry takes precedence; duplicate questions are collapsed. **Replace included categories** requires confirmation and replaces only the categories present in that backup. If a storage write fails, easyApply attempts to restore the previous stored values.
+
+Encrypted PAN/Aadhaar identity data, saved account passwords, AI provider credentials, session tokens, temporary state, and extension infrastructure are excluded. Resume documents are included as file data in the JSON; large files can make backups exceed the 20 MB import limit. Protected vaults and credentials need to be set up separately on a new device. Backups currently use format/schema version 1; unsupported versions are rejected.

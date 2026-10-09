@@ -31,6 +31,21 @@
   .job-match-heading h2 { font-size: 20px; }
 }
 .workspace-page-title { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.backup-restore { margin-top: 18px; }
+.backup-restore h1 { font-size: 22px; margin: 0 0 10px; }
+.backup-restore h2 { font-size: 16px; margin: 24px 0 10px; }
+.backup-restore p, .backup-restore label, .backup-restore li { font-size: 13px; }
+.backup-categories { border: 1px solid #9aa39f; border-radius: 8px; padding: 12px 16px; margin: 12px 0; display: grid; gap: 9px; }
+.backup-categories label { display: flex; align-items: center; gap: 9px; }
+.backup-categories input { width: auto; }
+.backup-muted { color: #5d6e66; font-size: 12px !important; }
+.backup-file { display: flex; flex-direction: column; gap: 8px; }
+.backup-preview { margin-top: 16px; padding: 16px; border: 1px solid #8e9a95; border-radius: 8px; background: #f7fbf9; }
+.backup-preview h3 { margin: 0 0 8px; font-size: 16px; }
+.backup-preview ul { padding-left: 20px; }
+.backup-preview select { margin-left: 8px; }
+.backup-success { color: #17684e; }
+.backup-error { color: #a12a20; }
 .workspace-dashboard { margin: 22px 0 28px; padding: 28px; border: 1px solid #8c9795; border-radius: 8px; background: radial-gradient(ellipse at top right, #d9f5e9 0, transparent 55%), #f7fbf9; box-shadow: 0 8px 28px #163d3310; }
 .workspace-topline, .workspace-welcome, .workspace-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .workspace-topline { margin-bottom: 22px; }
@@ -682,6 +697,15 @@ button.highlight-action:disabled {
   }
   nav .active {
     @apply bg-white text-teal-800 font-bold shadow-2xs;
+  }
+  nav .backup-tab {
+    @apply bg-teal-700 text-white font-bold shadow-sm;
+  }
+  nav .backup-tab:hover:not(:disabled) {
+    @apply bg-teal-800 text-white;
+  }
+  nav .backup-tab.active {
+    @apply bg-teal-900 text-white ring-2 ring-teal-300 ring-offset-1 ring-offset-slate-200/70;
   }
   footer {
     @apply flex gap-3 mb-8;

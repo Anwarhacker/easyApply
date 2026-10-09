@@ -100,6 +100,19 @@ export async function getStoredResumeDirect(
   } finally { db.close(); }
 }
 
+export async function listStoredResumeIdsDirect(): Promise<string[]> {
+  const db = await openDB();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const req = tx.objectStore(STORE_NAME).getAllKeys();
+      tx.oncomplete = () => resolve(req.result.map(String));
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("Resume listing was interrupted."));
+    });
+  } finally { db.close(); }
+}
+
 /**
  * Direct IndexedDB delete
  */
