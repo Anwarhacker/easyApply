@@ -8,7 +8,13 @@ function captionText(node: Element): string {
 }
 export function signals(el: Control): string[] {
   const root = el.getRootNode() as Document | ShadowRoot;
+  const radioGroup = el.closest("[role='radiogroup']");
+  const radioGroupLabels = radioGroup ? [
+    radioGroup.getAttribute("aria-label") ?? "",
+    (radioGroup.getAttribute("aria-labelledby") ?? "").split(/\s+/).map(id => root.getElementById?.(id)?.textContent ?? "").join(" "),
+  ] : [];
   const directLabels = [
+    ...radioGroupLabels,
     ...[...((el as HTMLInputElement).labels ?? [])].map(captionText),
     el.getAttribute("aria-label") ?? "",
     (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).map(id => root.getElementById?.(id)?.textContent ?? "").join(" "),

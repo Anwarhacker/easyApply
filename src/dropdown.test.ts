@@ -354,6 +354,22 @@ describe("matchSelectOption", () => {
     expect(matchSelectOption("Doctor of Philosophy in Robotics", levelOptions, "degree")?.value).toBe("phd");
     expect(matchSelectOption("Diploma in Mechanical Engineering", levelOptions, "degree")?.value).toBe("dip");
   });
+
+  it("rejects broad degree and overlapping experience or salary matches", () => {
+    expect(matchSelectOption("Bachelor", [
+      { value: "b", text: "Bachelor's Degree" },
+      { value: "be", text: "Bachelor of Engineering" },
+      { value: "bs", text: "Bachelor of Science" },
+    ], "degree")).toBeNull();
+    expect(matchSelectOption("2 years", [
+      { value: "a", text: "0-2 years" },
+      { value: "b", text: "1-3 years" },
+    ], "experience")).toBeNull();
+    expect(matchSelectOption("6 LPA", [
+      { value: "a", text: "3-6 LPA" },
+      { value: "b", text: "6-10 LPA" },
+    ], "expectedSalary")).toBeNull();
+  });
 });
 
 it("matches calling codes exactly, not longer prefixes", () => {

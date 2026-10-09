@@ -58,11 +58,13 @@ export const aliases: Record<Field | "pan" | "aadhaar", string[]> = {
   linkedin: ["linkedin", "linkedin url"],
   preferredRole: ["preferred role", "desired position", "job role"],
   preferredLocation: ["preferred location", "desired location", "job location"],
-  expectedSalary: ["expected salary", "salary expectation", "expected ctc", "ctc expectation", "salary range", "expected ctc range", "select salary"],
+  expectedSalary: ["expected salary", "expected pay", "salary expectation", "salary expectation per month", "expected ctc", "ctc expectation", "salary range", "expected ctc range", "select salary"],
   aboutYou: ["about you", "tell us about yourself"],
   whyHire: ["why should we hire you", "why hire you"],
   whyCompany: ["why this company", "why do you want to work here"],
-  availability: ["availability", "how soon can you join", "joining time", "availability to join", "select availability"],
+  availability: ["availability", "availability for new project", "available for new project", "how soon can you join", "joining time", "availability to join", "select availability"],
+  applicationSource: ["source", "application source", "how did you hear about this position", "how did you hear about us"],
+  backgroundCheck: ["background check", "willing for background check", "consent to background check", "background screening"],
   pan: ["pan", "pan number", "pan card"],
   aadhaar: ["aadhaar", "aadhaar number", "aadhar", "aadhar number"],
 };
@@ -82,7 +84,7 @@ export const normalize = (s: string) =>
     .replace(/\s+(?:required|mandatory|optional)$/, "")
     .trim();
 export const forbidden = (s: string) =>
-  /password|passcode|otp|one time|upi|bank|account number|credit card|debit card|cvv|ifsc|routing|social security|ssn|passport|consent|agree|terms|privacy|subscribe/i.test(
+  /password|passcode|otp|one time|captcha|signature|attest|declaration|upi|bank|account number|credit card|debit card|cvv|ifsc|routing|social security|ssn|passport|consent|agree|terms|privacy|subscribe/i.test(
     normalize(s),
   );
 type MatchedField = Field | "pan" | "aadhaar";
@@ -126,7 +128,7 @@ export function matchField(
   // Never reuse the applicant's contact details for another person's fields.
   if (
     normalized.some((s) =>
-      /\b(emergency|guardian|father|mother|parent|reference|referee|spouse|alternate)\b|\bsecondary\b.*\b(email|phone|mobile|contact|address)\b/.test(
+      /\b(?:emergency|guardian|father|mother|parent|reference|referee|spouse|alternate)\b.*\b(?:name|email|phone|mobile|contact|address|location)\b|\b(?:name|email|phone|mobile|contact|address|location)\b.*\b(?:emergency|guardian|father|mother|parent|reference|referee|spouse|alternate)\b|\bsecondary\b.*\b(?:email|phone|mobile|contact|address)\b/.test(
         s,
       ),
     )

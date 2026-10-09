@@ -15,6 +15,14 @@ describe("fresher profiles", () => {
     expect(saved.values.city).toBe("Kalaburagi");
     expect(saved.values.currentLocation).toBe("Bengaluru, Karnataka");
   });
+  it("adds the application source field to profiles saved before it existed", () => {
+    const old = blankProfile();
+    old.values.email = "saved@example.com";
+    delete (old.values as Partial<typeof old.values>).applicationSource;
+    const migrated = profileSchema.parse(migrateProfile(old));
+    expect(migrated.values.email).toBe("saved@example.com");
+    expect(migrated.values.applicationSource).toBe("");
+  });
   it("migrates old profiles without guessing personal or legal answers", () => {
     const old = blankProfile();
     old.values.fullName = "Saved Name";

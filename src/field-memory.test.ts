@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { questionKey, safeMemoryQuestion, rememberedAnswer, customFieldAnswersSchema, mergeRememberedAnswers } from "./field-memory";
+import { questionKey, safeMemoryQuestion, rememberedAnswer, rememberedAnswerKind, customFieldAnswersSchema, customFieldAnswerKindsSchema, mergeRememberedAnswers } from "./field-memory";
 import { blankProfile, profileSchema } from "./model";
 it("normalizes typography without losing conditions or negation", () => {
   expect(questionKey(" How did you hear about us? ")).toBe("how did you hear about us");
@@ -17,12 +17,25 @@ it("accepts ordinary bespoke answers and validates profile storage", () => {
   expect(customFieldAnswersSchema.safeParse({"How did you hear about this position?":"ABCDE1234F"}).success).toBe(false);
   expect(customFieldAnswersSchema.safeParse({"How did you hear about this position?":""}).success).toBe(false);
 });
+it("keeps legacy answers readable when their question becomes a standard profile field", () => {
+  const profile = blankProfile();
+  profile.customFieldAnswers = {"Expected Pay": "$90,000"};
+  profile.customFieldAnswerKinds = {"Expected Pay": "select"};
+  expect(profileSchema.safeParse(profile).success).toBe(true);
+  expect(safeMemoryQuestion("Expected Pay")).toBe(false);
+});
 it("does not choose between conflicting normalized keys", () => expect(rememberedAnswer("How did you hear about us?", {"How did you hear about us?":"A", "how did you hear about us":"B"})).toBe(""));
 
 it("supports short meaningful new labels but rejects generic labels", () => {
   expect(safeMemoryQuestion("Hobbies")).toBe(true);
   expect(safeMemoryQuestion("Answer")).toBe(false);
   expect(safeMemoryQuestion("API key")).toBe(false);
+});
+it("stores and retrieves the learned control type for a question", () => {
+  const kinds = {"Preferred collaboration tool?":"select" as const};
+  expect(customFieldAnswerKindsSchema.safeParse(kinds).success).toBe(true);
+  expect(rememberedAnswerKind("Preferred collaboration tool", kinds)).toBe("select");
+  expect(rememberedAnswerKind("Preferred development tool", kinds)).toBe("");
 });
 
 it("retains newly learned answers while applying deliberate edits and removals", () => {

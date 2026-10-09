@@ -160,5 +160,38 @@ test("autofill preserves radio choices, respects disabled groups and rechecks te
     result = await fill(preview);
     expect(result.filled).toBe(0);
     expect(result.errors.join(" ")).toContain("not accepted");
+
+    profile.values.employmentStatus = "Experienced";
+    await site.evaluate(() => { document.body.innerHTML = `<div role="radiogroup" aria-label="Employment status"><div id="status-experienced" role="radio" aria-checked="false">Experienced</div><div id="status-fresher" role="radio" aria-checked="false">Fresher</div></div>
+      <div role="radiogroup" aria-label="Preferred work schedule"><div id="schedule-experienced" role="radio" aria-checked="false">Experienced</div><div id="schedule-other" role="radio" aria-checked="false">Other</div></div>`;
+      for (const id of ["status-experienced", "status-fresher", "schedule-experienced", "schedule-other"]) document.getElementById(id)!.addEventListener("click", event => {
+        const chosen = event.currentTarget as HTMLElement;
+        chosen.closest("[role='radiogroup']")!.querySelectorAll<HTMLElement>("[role='radio']").forEach(radio => radio.setAttribute("aria-checked", String(radio === chosen)));
+      });
+    });
+    preview = await scan();
+    result = await fill(preview);
+    expect(result.filled, JSON.stringify({ preview: preview.matches, result })).toBe(1);
+    await expect(site.locator("#status-experienced")).toHaveAttribute("aria-checked", "true");
+    await expect(site.locator("#status-fresher")).toHaveAttribute("aria-checked", "false");
+    await expect(site.locator("#schedule-experienced")).toHaveAttribute("aria-checked", "false");
+
+    profile.values.country = "India";
+    profile.values.state = "Karnataka";
+    await site.evaluate(() => { document.body.innerHTML = `<form>
+      <label>Country<select id="country-parent"><option value="">Choose</option><option value="IN">India</option></select></label>
+      <div id="dependent-state"><label>State<select id="state-child"><option value="">Choose</option></select></label></div>
+      </form>`;
+      document.getElementById("country-parent")!.addEventListener("change", () => setTimeout(() => {
+        document.getElementById("dependent-state")!.innerHTML = `<label>State<select id="state-child"><option value="">Choose</option><option value="KA">Karnataka</option></select></label>`;
+      }, 700));
+    });
+    preview = await scan();
+    expect(preview.matches.find(match => match.field === "state")?.selected, JSON.stringify(preview.matches)).toBe(true);
+    result = await fill(preview);
+    expect(result.filled).toBe(2);
+    expect(result.errors).toEqual([]);
+    await expect(site.locator("#country-parent")).toHaveValue("IN");
+    await expect(site.locator("#state-child")).toHaveValue("KA");
   } finally { await context.close(); }
 });

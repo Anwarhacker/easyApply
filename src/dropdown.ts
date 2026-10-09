@@ -1,6 +1,8 @@
 import { normalize } from "./matching";
 import { isReactSelect } from "./react-select";
 import { matchNoticeOption } from "./converters";
+import { setNativeSelect } from "./native-select";
+import { readDropdownState, verifyDropdownSelection } from "./dropdown-state";
 
 export interface OptionCandidate {
   value: string;
@@ -175,7 +177,9 @@ export function isDropdownControl(el: Element): boolean {
     return true;
   }
   const isInput = typeof HTMLInputElement !== "undefined" && el instanceof HTMLInputElement;
-  if (isInput && isReactSelect(el)) return true;
+  if (isInput && (isReactSelect(el) || el.getAttribute("role") === "combobox" ||
+    ["list", "both", "inline"].includes(el.getAttribute("aria-autocomplete") || "") ||
+    !!el.closest("lyte-dropdown,lyte-select,crm-select,crm-dropdown,crux-select,crux-dropdown,mat-select,p-dropdown,el-select,v-select,ant-select,[data-component*='select'],[data-component*='dropdown']"))) return true;
   const isTextArea = typeof HTMLTextAreaElement !== "undefined" && el instanceof HTMLTextAreaElement;
   const role = el.getAttribute?.("role");
   if ((role === "combobox" || role === "listbox") && !isInput && !isTextArea) {
@@ -230,7 +234,7 @@ export function matchExperienceOption<T extends { value: string; text: string }>
     (!isNaN(numericVal) && numericVal === 0);
 
   if (isFresher) {
-    const match = options.find((o) => {
+    const matches = options.filter((o) => {
       const raw = `${o.text} ${o.value}`.toLowerCase();
       return (
         raw.includes("fresher") ||
@@ -246,39 +250,45 @@ export function matchExperienceOption<T extends { value: string; text: string }>
         raw.includes("below 1")
       );
     });
-    if (match) return match;
+    if (matches.length === 1) return matches[0];
   }
 
   const numMatch = targetVal.match(/(\d+(?:\.\d+)?)/);
   if (numMatch) {
     const years = parseFloat(numMatch[1]);
     // First pass: exact range containment (e.g. "2-3 Years", "1 to 3 years")
+    const rangeMatches: T[] = [];
     for (const opt of options) {
       const raw = `${opt.text} ${opt.value}`.toLowerCase();
       const range = raw.match(/(\d+(?:\.\d+)?)\s*(?:[-–—]|to)\s*(\d+(?:\.\d+)?)/);
       if (range) {
         const min = parseFloat(range[1]);
         const max = parseFloat(range[2]);
-        if (years >= min && years <= max) return opt;
+        if (years >= min && years <= max) rangeMatches.push(opt);
       }
     }
+    if (rangeMatches.length) return rangeMatches.length === 1 ? rangeMatches[0] : null;
     // Second pass: "X+ years" style (e.g. "5+ Years", "10 and above")
+    const plusMatches: T[] = [];
     for (const opt of options) {
       const raw = `${opt.text} ${opt.value}`.toLowerCase();
       const plusMatch = raw.match(/(\d+(?:\.\d+)?)\s*(?:\+|plus|more|over|above|and above)/);
       if (plusMatch) {
         const min = parseFloat(plusMatch[1]);
-        if (years >= min) return opt;
+        if (years >= min) plusMatches.push(opt);
       }
     }
+    if (plusMatches.length) return plusMatches.length === 1 ? plusMatches[0] : null;
     // Third pass: exact single year match (e.g. "3 Years")
+    const singleMatches: T[] = [];
     for (const opt of options) {
       const raw = `${opt.text} ${opt.value}`.toLowerCase();
       const singleMatch = raw.match(/(\d+(?:\.\d+)?)\s*(?:years?|yrs?)/);
       if (singleMatch && parseFloat(singleMatch[1]) === years) {
-        return opt;
+        singleMatches.push(opt);
       }
     }
+    if (singleMatches.length) return singleMatches.length === 1 ? singleMatches[0] : null;
   }
   return null;
 }
@@ -301,6 +311,7 @@ export function matchSalaryOption<T extends { value: string; text: string }>(
   }
   if (lpa === null || isNaN(lpa)) return null;
 
+  const matches: T[] = [];
   for (const opt of options) {
     // Normalize option text: strip commas for Indian notation
     const rawOpt = `${opt.text} ${opt.value}`.toLowerCase().replace(/,/g, "");
@@ -310,22 +321,22 @@ export function matchSalaryOption<T extends { value: string; text: string }>(
       let max = parseFloat(range[2]);
       if (min > 1000) min = min / 100000;
       if (max > 1000) max = max / 100000;
-      if (lpa >= min && lpa <= max) return opt;
+      if (lpa >= min && lpa <= max) matches.push(opt);
     }
     const under = rawOpt.match(/(?:under|less than|below|<)\s*(\d+(?:\.\d+)?)/);
     if (under) {
       let max = parseFloat(under[1]);
       if (max > 1000) max = max / 100000;
-      if (lpa < max) return opt;
+      if (lpa < max) matches.push(opt);
     }
     const plus = rawOpt.match(/(\d+(?:\.\d+)?)\s*(?:\+|plus|more|over|above|and above)/);
     if (plus) {
       let min = parseFloat(plus[1]);
       if (min > 1000) min = min / 100000;
-      if (lpa >= min) return opt;
+      if (lpa >= min) matches.push(opt);
     }
   }
-  return null;
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function matchSelectOption<T extends { value: string; text: string }>(
@@ -429,13 +440,11 @@ export function matchSelectOption<T extends { value: string; text: string }>(
 
 
   if (field === "totalExperience" || field === "experience") {
-    const match = matchExperienceOption(targetValue, searchPool);
-    if (match) return match;
+    return matchExperienceOption(targetValue, searchPool);
   }
 
   if (field === "expectedSalary" || field === "currentSalary") {
-    const match = matchSalaryOption(targetValue, searchPool);
-    if (match) return match;
+    return matchSalaryOption(targetValue, searchPool);
   }
 
   if (field === "workMode") {
@@ -513,8 +522,8 @@ export function matchSelectOption<T extends { value: string; text: string }>(
     // Priority 1: Specific degree pattern match
     for (const [targetPat, optPat] of DEGREE_PATTERNS) {
       if (targetPat.test(normTarget)) {
-        const match = searchPool.find((o) => optPat.test(normalize(o.text + " " + o.value)));
-        if (match) return match;
+        const matches = searchPool.filter((o) => optPat.test(normalize(o.text + " " + o.value)));
+        if (matches.length) return matches.length === 1 ? matches[0] : null;
       }
     }
 
@@ -525,17 +534,17 @@ export function matchSelectOption<T extends { value: string; text: string }>(
     const isDiploma = /\b(diploma|polytechnic)\b/i.test(normTarget);
 
     if (isBachelor) {
-      const match = searchPool.find((o) => {
+      const matches = searchPool.filter((o) => {
         const combined = normalize(o.text + " " + o.value);
         return /\b(bachelor(?: s)?|undergraduate|graduation)\b/i.test(combined);
       });
-      if (match) return match;
+      if (matches.length) return matches.length === 1 ? matches[0] : null;
     } else if (isMaster) {
-      const match = searchPool.find((o) => {
+      const matches = searchPool.filter((o) => {
         const combined = normalize(o.text + " " + o.value);
         return /\b(master(?: s)?|postgraduate|post graduation)\b/i.test(combined);
       });
-      if (match) return match;
+      if (matches.length) return matches.length === 1 ? matches[0] : null;
     } else if (isDoctorate) {
       const match = searchPool.find((o) => {
         const combined = normalize(o.text + " " + o.value);
@@ -703,52 +712,79 @@ export async function fillCustomDropdown(el: HTMLElement, targetValue: string, f
     const opts = [...innerSelect.options].filter(o => !o.disabled && !o.parentElement?.matches("optgroup[disabled]")).map(o => ({ value: o.value, text: o.text, index: o.index }));
     const matched = matchSelectOption(targetValue, opts, field);
     if (!matched) return false;
-    innerSelect.selectedIndex = matched.index;
-    innerSelect.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-    innerSelect.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-    await new Promise(resolve => setTimeout(resolve, 0));
-    return innerSelect.isConnected && innerSelect.selectedIndex === matched.index && innerSelect.value === matched.value;
+    return setNativeSelect(innerSelect, matched.value, matched.index!);
   }
 
-  const selector = "[role='option'],lyte-drop-item,mat-option,.lyteDropdownItem,.ant-select-item-option,.p-dropdown-item,.el-select-dropdown__item,[data-radix-select-item],[data-automation-id='promptOption']";
-  const trigger = el.querySelector<HTMLElement>("[role='combobox'],lyte-drop-button,button,[role='button']") ?? el;
-  const readSelection = () => el.getAttribute("value") || el.getAttribute("data-value") || trigger.getAttribute("aria-valuetext") || (trigger instanceof HTMLInputElement ? trigger.value : "");
-  const originalSelection = readSelection();
-  if (originalSelection && !isBlankDropdown(originalSelection)) return false;
+  const selector = "[role='option'],lyte-drop-item,mat-option,.lyteDropdownItem,.ant-select-item-option,.p-dropdown-item,.el-select-dropdown__item,[data-radix-select-item],[data-automation-id='promptOption'],[class*='option']";
+  const trigger = el.matches("input,button,[role='combobox'],[aria-haspopup='listbox']") ? el :
+    el.querySelector<HTMLElement>("input[role='combobox'],input[aria-autocomplete],input[type='search'],[role='combobox'],[aria-haspopup='listbox'],lyte-drop-button,button,[role='button']") ?? el;
+  const searchInput = trigger instanceof HTMLInputElement && (trigger.getAttribute("role") === "combobox" || trigger.hasAttribute("aria-autocomplete") || trigger.type === "search") ? trigger :
+    el.querySelector<HTMLInputElement>("input[role='combobox'],input[aria-autocomplete],input[type='search']");
+  const readState = () => readDropdownState(el, trigger);
+  const original = readState();
+  if ([original.value, original.text].some(value => value && !isBlankDropdown(value))) return false;
   const url = location.href;
-  const before = el.textContent;
-  const candidates = () => {
-    const roots: Element[] = [el];
-    for (const control of [el, trigger]) {
-      for (const id of `${control.getAttribute("aria-controls") || ""} ${control.getAttribute("aria-owns") || ""}`.split(/\s+/).filter(Boolean)) {
-        const root = control.getRootNode();
-        const owned = (root instanceof ShadowRoot ? root.getElementById(id) : document.getElementById(id));
-        if (owned) roots.push(owned);
-      }
-    }
-    return [...new Set(roots.flatMap(root => [...root.querySelectorAll<HTMLElement>(selector)]))]
-      .filter(item => item.isConnected && item.getClientRects().length && getComputedStyle(item).visibility !== "hidden" && !item.closest("[hidden],[aria-hidden='true'],[aria-disabled='true'],[disabled]"));
-  };
-  if (!candidates().length) trigger.click();
-  let items = candidates();
-  for (let attempt = 0; !items.length && attempt < 10; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-    if (!el.isConnected || location.href !== url) return false;
-    items = candidates();
+  const visible = (item: HTMLElement) => item.isConnected && !!item.getClientRects().length && getComputedStyle(item).visibility !== "hidden" && getComputedStyle(item).display !== "none" && !item.closest("[hidden],[aria-hidden='true'],[aria-disabled='true'],[disabled]");
+  const visibleLists = () => [...document.querySelectorAll<HTMLElement>("[role='listbox']")].filter(visible);
+  const beforeLists = new Set(visibleLists());
+  const beforeOptions = new Set([...document.querySelectorAll<HTMLElement>(selector)].filter(visible));
+  const ids = [el, trigger].flatMap(control => `${control.getAttribute("aria-controls") || ""} ${control.getAttribute("aria-owns") || ""}`.split(/\s+/).filter(Boolean));
+  if (trigger.getAttribute("aria-expanded") !== "true") trigger.click();
+  if (searchInput && isBlankDropdown(searchInput.value)) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (setter) setter.call(searchInput, targetValue);
+    else searchInput.value = targetValue;
+    searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: targetValue, inputType: "insertText" }));
   }
-  const matched = matchSelectOption(targetValue, items.map(item => ({ value: item.getAttribute("data-value") || item.getAttribute("value") || item.textContent?.trim() || "", text: item.textContent?.trim() || "", element: item })), field);
-  if (!matched || readSelection() !== originalSelection || el.matches(":disabled,[aria-disabled='true']")) return false;
-  // Let the site update its own state and validation. Do not rewrite labels,
-  // invent selection attributes, or hide its error messages.
-  matched.element.click();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, 50));
+  const optionElements = () => {
+    const lists = visibleLists();
+    const related = lists.filter(list => ids.includes(list.id));
+    const appeared = lists.filter(list => !beforeLists.has(list));
+    let roots: Element[] = related.length ? related : appeared.length ? appeared : trigger.getAttribute("aria-expanded") === "true" && lists.length === 1 ? lists : [];
+    if (!roots.length) {
+      const owned = ids.map(id => document.getElementById(id)).filter((item): item is HTMLElement => item instanceof HTMLElement && visible(item));
+      roots = owned;
+    }
+    const nested = roots.flatMap(root => [...root.querySelectorAll<HTMLElement>(selector)]);
+    const loose = [...document.querySelectorAll<HTMLElement>(selector)].filter(item =>
+      visible(item) && !beforeOptions.has(item) && (item.getAttribute("role") === "option" || !!item.closest("[role='listbox']")));
+    const local = el.querySelectorAll<HTMLElement>(selector);
+    return [...new Set([...nested, ...loose, ...[...local].filter(visible)])].filter(visible);
+  };
+  let items: HTMLElement[] = [];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (!el.isConnected || location.href !== url || el.matches(":disabled,[aria-disabled='true']")) return false;
+    items = optionElements();
+    if (items.length) break;
+    await new Promise(resolve => setTimeout(resolve, 75));
+  }
+  const candidates = items.map(item => ({ value: item.getAttribute("data-value") || item.getAttribute("value") || item.textContent?.trim() || "", text: item.textContent?.trim() || "", element: item }));
+  const matched = matchSelectOption(targetValue, candidates, field);
+  if (!matched) return false;
+  const expected = (actual: string) => normalize(actual) === normalize(matched.text) || normalize(actual) === normalize(matched.value) || !!matchSelectOption(targetValue, [{ value: actual, text: actual }], field);
+  const beforeClickState = readState();
+  matched.element!.click();
+  for (let attempt = 0; attempt < 16; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 60));
     if (!el.isConnected || location.href !== url) return false;
-    const value = el.getAttribute("value") || el.getAttribute("data-value") || trigger.getAttribute("aria-valuetext") || (trigger instanceof HTMLInputElement ? trigger.value : "");
-    const text = normalize(el.textContent || "");
-    if (matched.element.getAttribute("aria-selected") === "true" ||
-        (value && [normalize(matched.value), normalize(matched.text)].includes(normalize(value))) ||
-        (el.textContent !== before && text === normalize(matched.text))) return true;
+    const after = readState();
+    const stateChanged = verifyDropdownSelection(beforeClickState, after, [matched.text, matched.value]);
+    const expectedValue = [after.value, after.text, after.selected].some(value => !!value && expected(value));
+    if (stateChanged && expectedValue) return true;
+  }
+  // A keyboard fallback is safe only when the visible menu contains exactly
+  // the one unique option already resolved by the matcher.
+  if (items.length === 1 && items[0] === matched.element && el.isConnected && location.href === url) {
+    (trigger as HTMLElement).focus?.();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", bubbles: true }));
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 60));
+      if (!el.isConnected || location.href !== url) return false;
+      const after = readState();
+      if (verifyDropdownSelection(beforeClickState, after, [matched.text, matched.value]) &&
+        [after.value, after.text, after.selected].some(value => !!value && expected(value))) return true;
+    }
   }
   return false;
 }

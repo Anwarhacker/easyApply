@@ -1,7 +1,7 @@
 import { installFieldMemory, memoryQuestion } from "./field-memory-page";
 import { localDate } from "./application-tracker";
 import { installStepMonitor, isNextStepLabel, navigationLabel } from "./step-monitor";
-import { customFieldAnswersSchema, rememberedAnswer } from "./field-memory";
+import { customFieldAnswersSchema, customFieldAnswerKindsSchema, rememberedAnswer, rememberedAnswerKind } from "./field-memory";
 import { isDisclosureField, approvedDisclosureValue, disclosureAnswerMatches } from "./disclosures";
 import { fillSavedResume } from "./resume-page";
 import { aiFillSchema, scanAIPage, fillAIPage, aiReplaceSchema, replaceAIAnswer } from "./ai-page";
@@ -18,6 +18,7 @@ import { legalFields } from "./fresher";
 import { InPageWidget } from "./inpage-widget";
 import { inputCompatibilityError } from "./input-compatibility";
 import { isReactSelect, reactSelectValue, fillReactSelect } from "./react-select";
+import { isRadioControl, matchRadioChoice, radioGroupChoices, selectRadioChoice, setNativeSelect, optionMatchesAnswer } from "./selection-engine";
 import { smartConvert, matchNoticeOption, splitPhoneControl, birthDatePart } from "./converters";
 import { extractJobMetadata, isSubmitTrigger } from "./tracker-detector";
 import {
@@ -44,7 +45,8 @@ function supportedDatePicker(el: Control): boolean {
 }
 
 function radioHasSelection(el: Control): boolean {
-  if (!(el instanceof HTMLInputElement) || el.type !== "radio") return false;
+  if (!isRadioControl(el)) return false;
+  if (!(el instanceof HTMLInputElement)) return !!el.closest("[role='radiogroup']")?.querySelector("[role='radio'][aria-checked='true']");
   // Native groups share a tree, form owner and nonempty name. Unnamed radios
   // are independent even when they share a fieldset.
   if (!el.name) return el.checked;
@@ -52,7 +54,26 @@ function radioHasSelection(el: Control): boolean {
     .some(peer => peer.name === el.name && peer.form === el.form && peer.checked);
 }
 
-const rememberedMatches = new Map<string, {question: string; answer: string}>();
+function controlIdentity(el: Control): string {
+  const tag = el.tagName.toLowerCase();
+  const input = el as HTMLInputElement;
+  if (el.id) return `id:${tag}:${el.id}`;
+  if (input.name) return `name:${tag}:${input.name}`;
+  const label = signals(el).find(value => value.trim());
+  return label ? `label:${tag}:${normalize(label)}` : "";
+}
+
+function rediscoverControl(key: string, field: string | null): Control | null {
+  if (!key) return null;
+  const candidates = getAllControls().filter(el => controlIdentity(el) === key && fieldForControl(el) === field);
+  return candidates.length === 1 ? candidates[0] : null;
+}
+function precedesInForm(first: Control, second: Control): boolean {
+  return first.closest("form") === second.closest("form") &&
+    !!(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+}
+
+const rememberedMatches = new Map<string, {question: string; answer: string; kind: "text" | "textarea" | "select" | ""}>();
 const answerSuggestionMatches = new Map<string, Map<string, {question: string; answer: string}>>();
 const disclosureApprovals = new Map<string, string>();
 function disclosureControlValue(el: Control, answer: string): string {
@@ -76,10 +97,7 @@ const phonePairs = new Map<string, { selector: HTMLSelectElement; optionValue: s
 const registry = new Map<string, Control>();
 let filling = false;
 const selectContexts = new Map<string, { state: string; country: string }>();
-const snapshots = new Map<
-  string,
-  { value: string; kind: string; action: string; match: Match; selectOptions?: string }
->();
+const snapshots = new Map<string, { value: string; kind: string; action: string; match: Match; selectOptions?: string; expectedOptionText?: string; expectedAnswer?: string; controlKey: string }>();
 let scanProfileId = "";
 let scanId = "",
   scanUrl = "",
@@ -88,7 +106,7 @@ let expiry: ReturnType<typeof setTimeout> | undefined;
 
 function getAllControls(): Control[] {
   const query =
-    "input,textarea,select,lyte-dropdown,lyte-select,crm-select,crm-dropdown,crm-multi-select,crux-select,crux-dropdown,crux-select-component,crux-dropdown-component,mat-select,p-dropdown,el-select,v-select,ant-select,lightning-combobox,lightning-base-combobox,.ant-select,.select2-container,.chosen-container,[data-zcui*='select'],[data-zcui*='dropdown'],[data-component*='select'],[data-component*='dropdown'],[data-field-type*='select'],[data-field-type*='dropdown'],[data-ui*='dropdown'],[data-ui*='select'],[data-control*='dropdown'],[data-control*='select'],[data-radix-select-trigger],[data-automation-id*='select'],[data-automation-id*='dropdown'],[role='combobox']:not(input):not(textarea),[role='listbox']:not(input):not(textarea),[aria-haspopup='listbox']:not(input):not(textarea)";
+    "input,textarea,select,[role='radio'],lyte-dropdown,lyte-select,crm-select,crm-dropdown,crm-multi-select,crux-select,crux-dropdown,crux-select-component,crux-dropdown-component,mat-select,p-dropdown,el-select,v-select,ant-select,lightning-combobox,lightning-base-combobox,.ant-select,.select2-container,.chosen-container,[data-zcui*='select'],[data-zcui*='dropdown'],[data-component*='select'],[data-component*='dropdown'],[data-field-type*='select'],[data-field-type*='dropdown'],[data-ui*='dropdown'],[data-ui*='select'],[data-control*='dropdown'],[data-control*='select'],[data-radix-select-trigger],[data-automation-id*='select'],[data-automation-id*='dropdown'],[role='combobox']:not(input):not(textarea),[role='listbox']:not(input):not(textarea),[aria-haspopup='listbox']:not(input):not(textarea)";
   const elements = new Set<Control>();
   function search(node: Document | Element | ShadowRoot) {
     node.querySelectorAll<Control>(query).forEach((el) => elements.add(el));
@@ -104,13 +122,17 @@ function getAllControls(): Control[] {
 
 const controlValue = (el: Control) => {
   if (el instanceof HTMLInputElement && isReactSelect(el)) return reactSelectValue(el);
-  if (el instanceof HTMLInputElement && ["radio", "checkbox"].includes(el.type)) {
+  if (isRadioControl(el)) {
+    return el instanceof HTMLInputElement ? String(el.checked) : String(el.getAttribute("aria-checked") === "true");
+  }
+  if (el instanceof HTMLInputElement && el.type === "checkbox") {
     return String(el.checked);
   }
   if (el instanceof HTMLSelectElement) {
     return el.value || el.options[el.selectedIndex]?.text || "";
   }
   if (isDropdownControl(el)) {
+    if (el instanceof HTMLInputElement && !isBlankDropdown(el.value)) return el.value;
     return (
       (el as HTMLElement).getAttribute("lt-prop-selected") ||
       (el as HTMLElement).getAttribute("data-selected") ||
@@ -123,7 +145,7 @@ const controlValue = (el: Control) => {
   return (el as HTMLInputElement).value || "";
 };
 
-function detect(values: Record<string, string>, answers: Record<string, string> = {}, profileId = "", answerLibrary: SavedAnswer[] = []): Match[] {
+function detect(values: Record<string, string>, answers: Record<string, string> = {}, profileId = "", answerLibrary: SavedAnswer[] = [], answerKinds: Record<string, "text" | "textarea" | "select"> = {}): Match[] {
   if (filling) throw Error("A fill is still running. Wait for its result before scanning again.");
   rememberedMatches.clear();
   answerSuggestionMatches.clear();
@@ -149,7 +171,7 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
   const answerRole = answerLibrary.length
     ? extractJobMetadata(document, location.href).position || values.preferredRole
     : values.preferredRole;
-  return getAllControls()
+  const matches = getAllControls()
     .filter(
       (el) => {
         if ((el as HTMLInputElement).disabled || el.matches(":disabled")) return false;
@@ -174,8 +196,11 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
         id = crypto.randomUUID();
       registry.set(id, el);
       if (isReactSelect(el)) selectContexts.set(id, { state: values.state ?? "", country: values.country ?? "" });
-      const kind = isDropdownControl(el) ? "select" : (el as HTMLInputElement).type || el.tagName.toLowerCase();
+      const kind = isDropdownControl(el) ? "select" : isRadioControl(el) ? "radio" : (el as HTMLInputElement).type || el.tagName.toLowerCase();
       let value = field ? (values[field] ?? "") : "";
+      let expectedOptionText: string | undefined;
+      let expectedAnswer: string | undefined;
+      let radioChoiceResolved = false;
       let answerSuggestions: Match["answerSuggestions"];
       let unmatchedOption = false;
       if (field && !value && (field === "aboutYou" || field === "whyHire" || field === "whyCompany")) {
@@ -209,18 +234,18 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
       }
       if (
         kind === "radio" &&
-        value &&
-        ((field === "noticePeriod" || field === "availability") ||
-        (!hints.some((s) => normalize(s) === normalize(value)) &&
-        normalize((el as HTMLInputElement).value) !== normalize(value)))
+        value
       ) {
+        const radio = el as HTMLElement;
+        const peers = radioGroupChoices(radio);
         if (field === "noticePeriod" || field === "availability") {
-          const radio = el as HTMLInputElement;
-          const peers = [...(radio.getRootNode() as Document | ShadowRoot).querySelectorAll<HTMLInputElement>('input[type="radio"]')].filter(p => (radio.name ? p.name === radio.name : p === radio) && p.form === radio.form && !p.disabled);
-          const choice = matchNoticeOption(value, peers.map(p => ({ element: p, value: p.value, text: [...(p.labels ?? [])].map(l => l.textContent ?? "").join(" ").trim() || p.getAttribute("aria-label") || "" })));
+          const choice = matchNoticeOption(value, peers.map(p => ({ element: p.element!, value: p.value, text: p.text })));
           if (choice?.element !== radio) value = "";
+          else radioChoiceResolved = true;
         } else {
-          value = "";
+          const choice = matchRadioChoice(value, peers);
+          if (choice?.element !== radio) value = "";
+          else radioChoiceResolved = true;
         }
       }
       if (isDropdownControl(el) && value) {
@@ -230,8 +255,10 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
             text: o.text,
             index: o.index,
           }));
+          expectedAnswer = value;
           const matched = field === "dob" && birthDatePart(el, hints) ? opts.find(o => o.value === value) : matchSelectOption(value, opts, field ?? undefined);
           if (matched) {
+            expectedOptionText = matched.text;
             value = matched.value || matched.text;
           } else unmatchedOption = true;
         }
@@ -252,12 +279,15 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
       if (!field) {
         const question = memoryQuestion(el);
         const answer = rememberedAnswer(question, answers);
-        if (answer && (el instanceof HTMLSelectElement || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+        const rememberedKind = rememberedAnswerKind(question, answerKinds);
+        const controlKind = el instanceof HTMLSelectElement ? "select" : el instanceof HTMLTextAreaElement ? "textarea" : el instanceof HTMLInputElement ? "text" : "";
+        if (answer && (el instanceof HTMLSelectElement || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && (!rememberedKind || rememberedKind === controlKind)) {
           if (el instanceof HTMLSelectElement) {
             const options = [...el.options].filter(o => !o.disabled && !o.parentElement?.matches("optgroup[disabled]") && o.text.trim() === answer);
             value = options.length === 1 ? options[0].value : "";
+            if (value) { expectedAnswer = answer; expectedOptionText = answer; }
           } else value = answer;
-          if (value) rememberedMatches.set(id, {question,answer});
+          if (value) rememberedMatches.set(id, {question,answer,kind:rememberedKind});
         } else if (question && (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement && ["text", "search"].includes(el.type))) {
           const suggestions = rankAnswerMatches(question, answerLibrary, answerRole);
           if (suggestions.length) {
@@ -280,7 +310,8 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
       const isBlank = isDropdownControl(el) ? isBlankDropdown(valStr) : !valStr;
       const existingSelection = radioHasSelection(el) || (kind === "checkbox" && (el as HTMLInputElement).checked);
       const blocked = !!incompatible || unmatchedOption || existingSelection || (!["checkbox", "radio"].includes(kind) && !isBlank);
-      const lowConfidence = !!field && detection.confidence < 70;
+      const confidence = radioChoiceResolved ? Math.max(detection.confidence, 80) : detection.confidence;
+      const lowConfidence = !!field && confidence < 70;
       const reason = existingSelection ? "Already filled — existing choice preserved" : incompatible || (unmatchedOption ? "No matching dropdown option" : !isBlank && !["checkbox", "radio"].includes(kind)
         ? "Already filled — existing value preserved" : !field && !rememberedMatches.has(id)
           ? "Needs your answer — no profile field matched" : !value
@@ -290,8 +321,8 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
       const match: Match = {
         reason,
         blocked,
-        confidence: field ? detection.confidence : undefined,
-        evidence: field ? detection.evidence : undefined,
+        confidence: field ? confidence : undefined,
+        evidence: field ? (radioChoiceResolved ? [...detection.evidence, "Radio option uniquely matches the saved answer"] : detection.evidence) : undefined,
         answerSuggestions,
         id,
         label:
@@ -317,6 +348,9 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
       };
       snapshots.set(id, {
         selectOptions: el instanceof HTMLSelectElement ? el.innerHTML : undefined,
+        expectedOptionText,
+        expectedAnswer,
+        controlKey: controlIdentity(el),
         value: controlValue(el),
         kind,
         action: (el as HTMLInputElement).form?.action ?? "",
@@ -325,6 +359,22 @@ function detect(values: Record<string, string>, answers: Record<string, string> 
       return match;
     })
     .filter((m): m is Match => m !== null);
+  const parentFields: Record<string, string[]> = {
+    state: ["country"],
+    city: ["state", "country"],
+    preferredLocation: ["state", "country"],
+    branch: ["degree"],
+  };
+  for (const child of matches) {
+    if (!child.field || child.reason !== "No matching dropdown option" || !child.value) continue;
+    const parents = parentFields[child.field] ?? [];
+    if (matches.some(parent => parent.selected && parent.value && parents.includes(parent.field ?? ""))) {
+      child.blocked = false;
+      child.reason = undefined;
+      child.selected = true;
+    }
+  }
+  return matches;
 }
 async function fill(
   matches: Match[],
@@ -350,6 +400,7 @@ async function performFill(
   let filled = 0;
   const errors: string[] = [];
   const receipts: { el: Control; expected: string; label: string }[] = [];
+  const changedControls: Control[] = [];
   const fillDeadline = Date.now() + 45000;
   for (const m of matches) {
     if (!m.selected && m.kind !== "file") continue;
@@ -358,14 +409,52 @@ async function performFill(
       break;
     }
     if (Date.now() > fillDeadline) { errors.push("Some dropdowns took too long. Scan again to fill the remaining fields."); break; }
-    const el = registry.get(m.id);
+    let el = registry.get(m.id);
     const snapshot = snapshots.get(m.id);
+    let replacedByParent = false;
+    if (el && !el.isConnected && snapshot && filled > 0) {
+      const replacement = rediscoverControl(snapshot.controlKey, m.field);
+      if (replacement) { el = replacement; registry.set(m.id, replacement); replacedByParent = true; }
+    }
+    const hasEarlierDropdown = el ? changedControls.some(parent => parent !== el && isDropdownControl(parent) && precedesInForm(parent, el!)) : false;
+    if (el instanceof HTMLSelectElement && snapshot?.expectedAnswer && hasEarlierDropdown &&
+      !matchSelectOption(snapshot.expectedAnswer, [...el.options].filter(o => !o.disabled && !o.parentElement?.matches("optgroup[disabled]")).map(o => ({ value: o.value, text: o.text })), m.field ?? undefined)) {
+      for (let attempt = 0; attempt < 15; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (token !== scanId || location.href !== scanUrl) break;
+        if (!el.isConnected) {
+          const replacement = rediscoverControl(snapshot.controlKey, m.field);
+          if (replacement instanceof HTMLSelectElement) { el = replacement; registry.set(m.id, replacement); replacedByParent = true; }
+        }
+        if (!(el instanceof HTMLSelectElement)) break;
+        const options = [...el.options].filter(o => !o.disabled && !o.parentElement?.matches("optgroup[disabled]")).map(o => ({ value: o.value, text: o.text }));
+        if (matchSelectOption(snapshot.expectedAnswer, options, m.field ?? undefined)) break;
+      }
+    }
     const isSelect = el instanceof HTMLSelectElement;
     const isCustomDropdown = el ? isDropdownControl(el) : false;
     const currentKind = isCustomDropdown
       ? "select"
-      : (el as HTMLInputElement)?.type || el?.tagName.toLowerCase();
+      : el && isRadioControl(el) ? "radio" : (el as HTMLInputElement)?.type || el?.tagName.toLowerCase();
     const suggestedAnswer = m.answerId ? answerSuggestionMatches.get(m.id)?.get(m.answerId) : undefined;
+    const optionsChanged = isSelect && (el as HTMLSelectElement).innerHTML !== snapshot?.selectOptions;
+    const dependencyRefresh = !!el && filled > 0 && isSelect && (replacedByParent || optionsChanged);
+    if (dependencyRefresh && el instanceof HTMLSelectElement && snapshot) {
+      const answer = snapshot.expectedAnswer || m.value;
+      const options = [...el.options].filter(o => !o.disabled && !o.parentElement?.matches("optgroup[disabled]")).map(o => ({ value: o.value, text: o.text, index: o.index }));
+      const refreshed = matchSelectOption(answer, options, m.field ?? undefined);
+      if (!refreshed) {
+        errors.push(`${m.label}: dependent options changed and no unique match remains; select manually`);
+        continue;
+      }
+      m.value = refreshed.value;
+      snapshot.match.value = refreshed.value;
+      snapshot.expectedAnswer = answer;
+      snapshot.expectedOptionText = refreshed.text;
+      snapshot.value = controlValue(el);
+      snapshot.selectOptions = el.innerHTML;
+      snapshot.action = el.form?.action ?? "";
+    }
     if (
       !el ||
       !snapshot ||
@@ -373,8 +462,8 @@ async function performFill(
       (!isSelect && !isCustomDropdown && !el.getClientRects().length) ||
       currentKind !== snapshot.kind ||
       ((el as HTMLInputElement).form?.action ?? "") !== snapshot.action ||
-      controlValue(el) !== snapshot.value ||
-      (isSelect && (el as HTMLSelectElement).innerHTML !== snapshot.selectOptions) ||
+      (controlValue(el) !== snapshot.value && !dependencyRefresh) ||
+      (optionsChanged && !dependencyRefresh) ||
       snapshot.match.field !== m.field ||
       (!m.answerId && snapshot.match.value !== m.value) ||
       (m.answerId && (!suggestedAnswer || suggestedAnswer.answer !== m.value)) ||
@@ -429,7 +518,8 @@ async function performFill(
       continue;
     }
     const memory = suggestedAnswer ?? rememberedMatches.get(m.id);
-    if (memory && (memoryQuestion(el) !== memory.question || (el instanceof HTMLSelectElement && [...el.options].filter(o => !o.disabled && !o.parentElement?.matches("optgroup[disabled]") && o.value === m.value && o.text.trim() === memory.answer).length !== 1))) {
+    const currentMemoryKind = el instanceof HTMLSelectElement ? "select" : el instanceof HTMLTextAreaElement ? "textarea" : el instanceof HTMLInputElement ? "text" : "";
+    if (memory && (memoryQuestion(el) !== memory.question || ("kind" in memory && memory.kind && memory.kind !== currentMemoryKind) || (el instanceof HTMLSelectElement && [...el.options].filter(o => !o.disabled && !o.parentElement?.matches("optgroup[disabled]") && o.value === m.value && o.text.trim() === memory.answer).length !== 1))) {
       errors.push(`${m.label}: remembered question changed; scan again`); continue;
     }
     if (isDisclosureField(m.field)) {
@@ -455,7 +545,7 @@ async function performFill(
       else errors.push(`${m.label}: no unique matching option was accepted; select manually`);
       continue;
     }
-    const incompatible = inputCompatibilityError(el, m.value);
+    const incompatible = isCustomDropdown ? null : inputCompatibilityError(el, m.value);
     if (incompatible) {
       errors.push(`${m.label}: ${incompatible}`);
       continue;
@@ -494,17 +584,21 @@ async function performFill(
         errors.push(`${m.label}: no matching option`);
         continue;
       }
-      el.value = matched.value;
-      if (typeof matched.index === "number") {
-        el.selectedIndex = matched.index;
+      if (typeof matched.index !== "number" || !await setNativeSelect(el, matched.value, matched.index)) {
+        errors.push(`${m.label}: website did not accept the selected option; review this field`);
+        continue;
       }
-      el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
       el.dispatchEvent(new FocusEvent("blur", { bubbles: true, composed: true }));
       el.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
-
+      const selected = el.selectedOptions[0];
+      if (!selected || normalize(selected.text) !== normalize(snapshot.expectedOptionText ?? matched.text) ||
+        !optionMatchesAnswer(snapshot.expectedAnswer ?? "", { value: selected.value, text: selected.text }, m.field ?? undefined)) {
+        errors.push(`${m.label}: selected option does not match the expected answer; review this field`);
+        continue;
+      }
       receipts.push({ el, expected: matched.value, label: m.label });
       filled++;
+      changedControls.push(el);
       continue;
     }
     if (isDropdownControl(el)) {
@@ -512,24 +606,36 @@ async function performFill(
       if (ok) {
         receipts.push({ el, expected: controlValue(el), label: m.label });
         filled++;
+        changedControls.push(el);
       } else {
         errors.push(`${m.label}: could not select option`);
       }
       continue;
-    } else if (
-      el instanceof HTMLInputElement &&
-      ["radio", "checkbox"].includes(el.type)
-    ) {
-      Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        "checked",
-      )?.set?.call(el, true);
+    } else if (isRadioControl(el) || el instanceof HTMLInputElement && el.type === "checkbox") {
+      if (isRadioControl(el)) {
+        if (!(el instanceof HTMLElement) || !selectRadioChoice(el)) {
+          errors.push(`${m.label}: website did not accept the selected choice; review this field`);
+          continue;
+        }
+      } else {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked")?.set?.call(el, true);
+        el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+      }
+      const checked = el instanceof HTMLInputElement ? el.checked : el.getAttribute("aria-checked") === "true";
+      const roleGroup = !(el instanceof HTMLInputElement) ? el.closest("[role='radiogroup']") : null;
+      const groupValid = !roleGroup || roleGroup.querySelectorAll("[role='radio'][aria-checked='true']").length === 1;
+      if (!checked || !groupValid) {
+        errors.push(`${m.label}: website did not accept the selected choice; review this field`);
+        continue;
+      }
       receipts.push({ el, expected: "true", label: m.label });
-      el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-      el.dispatchEvent(new FocusEvent("blur", { bubbles: true, composed: true }));
-      el.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
+      if (el instanceof HTMLElement) {
+        el.dispatchEvent(new FocusEvent("blur", { bubbles: true, composed: true }));
+        el.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
+      }
       filled++;
+      if (isRadioControl(el)) changedControls.push(el);
       continue;
     } else if (
       el instanceof HTMLInputElement &&
@@ -704,7 +810,7 @@ const fieldMemory = installFieldMemory();
 const inpageWidget = new InPageWidget({
   onScan: (profile: Profile) => {
     fieldMemory.selectProfile(profile.id);
-    const matches = detect(profile.values, profile.customFieldAnswers, profile.id);
+    const matches = detect(profile.values, profile.customFieldAnswers, profile.id, [], profile.customFieldAnswerKinds);
     (window as unknown as { easyApplyScanId?: string }).easyApplyScanId =
       scanId;
     return matches;
@@ -825,6 +931,7 @@ const requestSchema = z.discriminatedUnion("type", [
     values: z.record(z.string().max(100), z.string().max(10000)),
     profileId: z.string().max(100).optional(),
     customFieldAnswers: customFieldAnswersSchema.optional(),
+    customFieldAnswerKinds: customFieldAnswerKindsSchema.optional(),
     answerLibrary: z.array(savedAnswerSchema).max(500).optional(),
   }),
   z.object({
@@ -874,7 +981,7 @@ window.applyEaseListener = (raw, sender, respond) => {
     if (message.type === "ping") respond({ ready: true });
     if (message.type === "detect") {
       if (message.profileId) fieldMemory.selectProfile(message.profileId);
-      respond({ matches: detect(message.values, message.customFieldAnswers, message.profileId, message.answerLibrary), scanId, url: scanUrl });
+      respond({ matches: detect(message.values, message.customFieldAnswers, message.profileId, message.answerLibrary, message.customFieldAnswerKinds), scanId, url: scanUrl });
     }
     if (message.type === "fill") {
       fill(

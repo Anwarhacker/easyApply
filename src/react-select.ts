@@ -1,4 +1,5 @@
 import { normalize } from "./matching";
+import { readDropdownState, verifyDropdownSelection } from "./dropdown-state";
 
 // Scope support to the React Select markup observed on Greenhouse. Unknown
 // comboboxes still require manual selection.
@@ -27,6 +28,8 @@ export function sameSelectAnswer(actual: string, expected: string, field?: strin
 
 export async function fillReactSelect(el: HTMLInputElement, value: string, field?: string, context: SelectContext = {}): Promise<boolean> {
   if (!isReactSelect(el) || !el.getClientRects().length || el.disabled || reactSelectValue(el) || !value) return false;
+  const control = el.closest<HTMLElement>(".select__control") ?? el;
+  const before = readDropdownState(el, control);
   let search = "";
   const setSearch = (text: string) => {
     const previous = el.value;
@@ -55,7 +58,8 @@ export async function fillReactSelect(el: HTMLInputElement, value: string, field
         for (let attempt = 0; attempt < 8; attempt++) {
           await new Promise(resolve => setTimeout(resolve, 50));
           const selected = el.closest(".select__control")?.querySelector(".select__single-value")?.textContent?.trim();
-          if (selected === text && el.getAttribute("aria-expanded") !== "true") return true;
+          const after = readDropdownState(el, control);
+          if (selected === text && el.getAttribute("aria-expanded") !== "true" && verifyDropdownSelection(before, after, text)) return true;
         }
         return false;
       }

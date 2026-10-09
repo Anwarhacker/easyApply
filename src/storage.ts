@@ -27,10 +27,15 @@ export async function readData(): Promise<{
     .array(applicationSchema)
     .max(5000)
     .safeParse(d.applications ?? []);
-  if (!profiles.success || !applications.success)
+  if (!profiles.success || !applications.success) {
+    const diagnostics = [
+      !profiles.success ? `profiles (${profiles.error.issues.slice(0, 3).map(issue => issue.path.join(".") || issue.message).join(", ")})` : "",
+      !applications.success ? `applications (${applications.error.issues.slice(0, 3).map(issue => issue.path.join(".") || issue.message).join(", ")})` : "",
+    ].filter(Boolean).join("; ");
     throw Error(
-      "Saved data could not be validated. It has not been changed. Reload easyApply; if this persists, keep the stored data for recovery.",
+      `Saved data could not be validated${diagnostics ? `: ${diagnostics}` : ""}. It has not been changed. Reload easyApply; if this persists, keep the stored data for recovery.`,
     );
+  }
   return {
     profiles: profiles.data,
     applications: applications.data,

@@ -47,6 +47,7 @@ export const fresherGroups = {
     "workAuthorization",
     "visaSponsorship",
     "previouslyApplied",
+    "backgroundCheck",
   ],
 } as const;
 export type FresherField =
@@ -89,6 +90,7 @@ export const fresherLabels: Record<FresherField, string> = {
   workAuthorization: "Authorized to work in India",
   visaSponsorship: "Requires visa sponsorship",
   previouslyApplied: "Previously applied to this company",
+  backgroundCheck: "Willing for background check",
 };
 export const fieldOptions: Partial<Record<FresherField, string[]>> = {
   preDegreeType: ["12th", "Diploma"],
@@ -100,11 +102,13 @@ export const fieldOptions: Partial<Record<FresherField, string[]>> = {
   workAuthorization: ["Yes", "No"],
   visaSponsorship: ["Yes", "No"],
   previouslyApplied: ["Yes", "No"],
+  backgroundCheck: ["Yes", "No"],
 };
 export const legalFields: readonly string[] = [
   "workAuthorization",
   "visaSponsorship",
   "previouslyApplied",
+  "backgroundCheck",
 ];
 const year = z
   .string()
@@ -320,6 +324,7 @@ export const fresherAliases: Record<FresherField, string[]> = {
     "applied before",
     "have you applied before",
   ],
+  backgroundCheck: ["background check", "willing for background check", "background screening"],
 };
 // Only add new keys when reading old profiles; never replace existing data.
 export function migrateProfile(value: unknown): unknown {
@@ -337,6 +342,7 @@ export function migrateProfile(value: unknown): unknown {
       ...Object.values(fresherGroups).flat(),
       "salutation",
       "currentLocation",
+      "applicationSource",
       ...disclosureKeys,
     ].map((k) => [k, ""]),
   );

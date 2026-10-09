@@ -11,12 +11,23 @@ export function safeMemoryQuestion(s: string): boolean {
   return s.trim().length >= 3 && !/^(answer|other|details|value)$/i.test(s.trim()) && s.length <= 300 && !sensitiveMemoryQuestion(s) && !matchField([s]);
 }
 export const memoryAnswerSchema = z.string().trim().min(1).max(2000).refine(value => customEntrySchema.shape.value.safeParse(value).success && !/-----BEGIN|\b(?:gsk_|sk-)[a-zA-Z0-9_-]+/.test(value), "Use ordinary application answers only.");
-export const customFieldAnswersSchema = z.record(z.string().refine(safeMemoryQuestion), memoryAnswerSchema).refine(record => Object.keys(record).length <= 100, "Save up to 100 remembered answers per profile.");
-export const memoryCandidateSchema = z.object({ question: z.string().refine(safeMemoryQuestion), answer: memoryAnswerSchema });
+export const memoryControlKindSchema = z.enum(["text", "textarea", "select"]);
+// Persisted entries may predate a field becoming a known match or a question
+// becoming protected. Keep their labels readable so one legacy answer cannot
+// invalidate the whole profile. New answers still go through memoryCandidateSchema.
+const storedQuestionSchema = z.string().trim().min(3).max(300);
+export const customFieldAnswersSchema = z.record(storedQuestionSchema, memoryAnswerSchema).refine(record => Object.keys(record).length <= 100, "Save up to 100 remembered answers per profile.");
+export const customFieldAnswerKindsSchema = z.record(storedQuestionSchema, memoryControlKindSchema).refine(record => Object.keys(record).length <= 100, "Save up to 100 remembered answer types per profile.");
+export const memoryCandidateSchema = z.object({ question: z.string().refine(safeMemoryQuestion), answer: memoryAnswerSchema, kind: memoryControlKindSchema.default("text") });
 export function rememberedAnswer(question: string, answers: Record<string, string>): string {
   if (!safeMemoryQuestion(question)) return "";
   const matches = Object.entries(answers).filter(([label]) => questionKey(label) === questionKey(question));
   return matches.length === 1 && memoryAnswerSchema.safeParse(matches[0][1]).success ? matches[0][1] : "";
+}
+export function rememberedAnswerKind(question: string, kinds: Record<string, "text" | "textarea" | "select">): "text" | "textarea" | "select" | "" {
+  if (!safeMemoryQuestion(question)) return "";
+  const matches = Object.entries(kinds).filter(([label]) => questionKey(label) === questionKey(question));
+  return matches.length === 1 ? matches[0][1] : "";
 }
 
 /** Apply deliberate edits while retaining answers learned since the editor opened. */

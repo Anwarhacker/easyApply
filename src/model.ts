@@ -1,4 +1,4 @@
-import { customFieldAnswersSchema } from "./field-memory";
+import { customFieldAnswersSchema, customFieldAnswerKindsSchema } from "./field-memory";
 import { disclosureLabels, disclosureOptions } from "./disclosures";
 import { z } from "zod";
 import {
@@ -45,6 +45,7 @@ export const groups = {
     "whyHire",
     "whyCompany",
     "availability",
+    "applicationSource",
   ],
   "Voluntary Disclosures": ["disclosuresEnabled", "voluntaryGender", "raceEthnicity", "veteranStatus", "disabilityStatus"],
   ...fresherGroups,
@@ -52,11 +53,12 @@ export const groups = {
 export type Field = (typeof groups)[keyof typeof groups][number];
 export const label = (s: string) =>
   disclosureLabels[s] ?? fresherLabels[s as keyof typeof fresherLabels] ??
+  (s === "applicationSource" ? "Application source" :
   s
     .replace(/([A-Z])/g, " $1")
     .replace(/^./, (c) => c.toUpperCase())
     .replace("Cgpa", "CGPA")
-    .replace("Dob", "Date of birth");
+    .replace("Dob", "Date of birth"));
 const url = z
   .string()
   .refine(
@@ -67,6 +69,7 @@ export const profileSchema = z.object({
   id: z.string().min(1).max(100),
   title: z.string().trim().min(1, "Profile name is required").max(100),
   customFieldAnswers: customFieldAnswersSchema.optional(),
+  customFieldAnswerKinds: customFieldAnswerKindsSchema.optional(),
   values: z
     .object(
       Object.fromEntries(

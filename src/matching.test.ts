@@ -2,6 +2,16 @@ import { describe, it, expect } from "vitest";
 import { matchField } from "./matching";
 import { alternateLabels } from "./alternate-labels";
 describe("field matching", () => {
+  it("matches a country label despite an implementation ID", () => expect(matchField(["Country", "country-parent"])).toBe("country"));
+  it.each([
+    ["Expected Pay", "expectedSalary"],
+    ["Availability for new project", "availability"],
+    ["Willing to relocate", "relocate"],
+    ["Willing for background check", "backgroundCheck"],
+    ["Source", "applicationSource"],
+  ])("matches application selection field %s", (question, field) => {
+    expect(matchField([question])).toBe(field);
+  });
   it.each([
     [["Current salary", "expectedSalary"], "currentSalary"],
     [["Permanent address", "currentAddress"], "permanentAddress"],

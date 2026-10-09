@@ -135,6 +135,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (Object.keys(answers).length >= 100) throw Error("Your answer memory is full. Remove an answer in Settings first.");
           answers[candidate.question] = candidate.answer;
           target.customFieldAnswers = answers;
+          target.customFieldAnswerKinds = { ...target.customFieldAnswerKinds, [candidate.question]: candidate.kind };
           await saveProfiles(current.profiles);
           return true;
         });
@@ -156,9 +157,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const target = current.profiles.find(p => p.id === profileId);
           if (!target) throw Error("This profile was deleted.");
           const answers = { ...target.customFieldAnswers };
+          const kinds = { ...target.customFieldAnswerKinds };
           for (const label of Object.keys(answers)) if (questionKey(label) === questionKey(candidate.question)) delete answers[label];
+          for (const label of Object.keys(kinds)) if (questionKey(label) === questionKey(candidate.question)) delete kinds[label];
           answers[candidate.question] = candidate.answer;
           target.customFieldAnswers = answers;
+          kinds[candidate.question] = candidate.kind;
+          target.customFieldAnswerKinds = kinds;
           await saveProfiles(current.profiles);
         });
       }

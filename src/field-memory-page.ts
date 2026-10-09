@@ -15,7 +15,7 @@ export function memoryQuestion(el: Element): string {
 }
 export function installFieldMemory() {
   let profileId = "";
-  const edited = new Map<Element, {question: string; answer: string}>();
+  const edited = new Map<Element, {question: string; answer: string; kind: "text" | "textarea" | "select"}>();
   const offered = new Set<string>();
   let host: HTMLElement | null = null;
   let active = true;
@@ -108,7 +108,8 @@ export function installFieldMemory() {
     if (question && el.getAttribute("role") !== "combobox" && !(el instanceof HTMLSelectElement && el.multiple)) {
       const control = el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
       const answer = control instanceof HTMLSelectElement ? control.selectedOptions[0]?.text ?? "" : control.value;
-      edited.set(el, {question,answer});
+      const kind = control instanceof HTMLSelectElement ? "select" : control instanceof HTMLTextAreaElement ? "textarea" : "text";
+      edited.set(el, {question,answer,kind});
     }
     else edited.delete(el);
     if (edited.size > 30) edited.delete(edited.keys().next().value!);

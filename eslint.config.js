@@ -10,6 +10,7 @@ export default ts.config(
       ".browser/**",
       ".browser134/**",
       ".test-browser-profiles/**",
+      ".kilo/**",
       "playwright-results/**",
       "node_modules/**",
       "playwright-report/**",

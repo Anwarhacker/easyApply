@@ -60,6 +60,11 @@ test("learns new manual answers and reuses them without submitting", async () =>
       return profiles.find((p: {id:string}) => p.id === activeProfileId).customFieldAnswers ?? {};
     });
     await expect.poll(learnedAnswers).toEqual({"Favorite development editor?":"VS Code", "Preferred collaboration tool?":"Slack"});
+    const learnedKinds = () => settings.evaluate(async () => {
+      const {profiles,activeProfileId} = await chrome.storage.local.get(["profiles","activeProfileId"]);
+      return profiles.find((p: {id:string}) => p.id === activeProfileId).customFieldAnswerKinds ?? {};
+    });
+    await expect.poll(learnedKinds).toEqual({"Favorite development editor?":"text", "Preferred collaboration tool?":"select"});
     await expect(settings.getByRole("region", {name:"Answer learning"})).toContainText("2 remembered answers");
     // A changed answer requires review, even in automatic learning mode.
     await site.locator("#learn-editor").fill("Vim");
@@ -77,12 +82,22 @@ test("learns new manual answers and reuses them without submitting", async () =>
       const tab = (await chrome.tabs.query({})).find(t => t.url === url)!;
       const {profiles,activeProfileId} = await chrome.storage.local.get(["profiles","activeProfileId"]);
       const profile = profiles.find((p:{id:string}) => p.id === activeProfileId);
-      const scan = await chrome.tabs.sendMessage(tab.id!, {type:"detect",profileId:profile.id,values:profile.values,customFieldAnswers:profile.customFieldAnswers});
+      const scan = await chrome.tabs.sendMessage(tab.id!, {type:"detect",profileId:profile.id,values:profile.values,customFieldAnswers:profile.customFieldAnswers,customFieldAnswerKinds:profile.customFieldAnswerKinds});
       return chrome.tabs.sendMessage(tab.id!, {type:"fill",scanId:scan.scanId,matches:scan.matches,confirmSensitive:false});
     }, url);
     expect(learnedFill.filled).toBe(2);
     await expect(site.locator("#learn-again")).toHaveValue("VS Code");
     await expect(site.locator("#tool-again")).toHaveValue("different-id");
+    await site.evaluate(() => { document.body.innerHTML = '<label>Preferred collaboration tool?<input id="wrong-kind"></label>'; });
+    const wrongKind = await worker.evaluate(async url => {
+      const tab = (await chrome.tabs.query({})).find(t => t.url === url)!;
+      const {profiles,activeProfileId} = await chrome.storage.local.get(["profiles","activeProfileId"]);
+      const profile = profiles.find((p:{id:string}) => p.id === activeProfileId);
+      const scan = await chrome.tabs.sendMessage(tab.id!, {type:"detect",profileId:profile.id,values:profile.values,customFieldAnswers:profile.customFieldAnswers,customFieldAnswerKinds:profile.customFieldAnswerKinds});
+      return scan.matches.find((match:{label:string}) => match.label === "Preferred collaboration tool?");
+    }, url);
+    expect(wrongKind?.selected).toBe(false);
+    expect(wrongKind?.value).toBe("");
     await settings.getByRole("checkbox", {name:"Learn new answers automatically"}).uncheck();
     await site.evaluate(() => { document.body.innerHTML = '<label>Favorite testing technique?<input id="learn-off"></label><button id="blur-off" type="button">Done</button>'; });
     await site.locator("#learn-off").fill("Integration tests");

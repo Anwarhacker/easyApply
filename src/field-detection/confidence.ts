@@ -9,7 +9,9 @@ const weights = {
   name: 65,
   id: 40,
   type: 75,
-  nearby: 60,
+  // Nearby text is only collected from a tiny container with a single control;
+  // in that case it acts as the field's visible label rather than page context.
+  nearby: 70,
 };
 
 export function scoreField(metadata: FieldMetadata, field: string | null) {

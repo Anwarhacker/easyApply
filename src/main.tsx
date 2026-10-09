@@ -316,13 +316,15 @@ function App() {
     try { answerLibrary = await getAnswerLibrary(); }
     catch (error) { answerLibraryStatus = error instanceof Error ? `Saved answer suggestions unavailable: ${error.message}` : "Saved answer suggestions unavailable."; }
 
+    const rememberedProfile = (await readData()).profiles.find(p => p.id === profile.id);
     const result = await withTimeout(
       chrome.tabs.sendMessage(
         current.id,
         {
           type: "detect",
           profileId: profile.id,
-          customFieldAnswers: (await readData()).profiles.find(p => p.id === profile.id)?.customFieldAnswers,
+          customFieldAnswers: rememberedProfile?.customFieldAnswers,
+          customFieldAnswerKinds: rememberedProfile?.customFieldAnswerKinds,
           answerLibrary,
           values: { ...profile.values, ...identity },
         },
@@ -645,7 +647,8 @@ function App() {
                       <p>
                         Answer only for your situation and this company. These
                         answers start unchecked in the autofill preview. Leaving
-                        an answer blank means it will not be filled.
+                        an answer blank means it will not be filled. Background
+                        check answers are explicit profile choices and are never inferred.
                       </p>
                     )}
                     {title === "Joining preferences" && (
